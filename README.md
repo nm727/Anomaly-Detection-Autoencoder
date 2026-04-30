@@ -72,6 +72,14 @@ graph LR
     In -.->|Pixel-wise difference highlights anomalies| Out
 ```
 
+#### Visualizing the Architecture and Filters
+
+![Encoder Tensor Dimensions](encoder_tensor_dimensions.svg)
+
+![Block 2 Filter Mechanism](block2_filter_mechanism.svg)
+
+![Filter Depth Hierarchy](filter_depth_hierarchy.svg)
+
 ---
 
 ## 🔍 Detailed Methodology
