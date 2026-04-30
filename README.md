@@ -1,97 +1,120 @@
 # Anomaly Detection with Convolutional Autoencoders - MVTec AD
 
-This project demonstrates a comprehensive approach to anomaly detection using the **MVTec AD** dataset, focusing specifically on the `bottle` category. MVTec AD is the industry-standard benchmark for anomaly detection in images, simulating realistic industrial scenarios where the model is trained exclusively on normal (defect-free) images.
+This project presents a complete, end-to-end framework for industrial anomaly detection using the **MVTec AD** dataset (focusing on the `bottle` category). Unlike standard academic datasets (e.g., Fashion MNIST), MVTec AD provides a highly realistic and challenging scenario: models must learn to identify subtle, localized manufacturing defects (like scratches, tiny holes, or liquid contamination) while being trained **exclusively on defect-free (normal) images**.
 
-## Project Overview
+## Why this approach?
 
-The main objective of this project is to accurately detect and localize subtle defects (e.g., scratches, holes, contaminations) on bottles. We approach this using a PyTorch-based Convolutional Autoencoder (CAE) and compare its performance against several traditional machine learning baseline methods.
+In real-world manufacturing, collecting thousands of examples of every possible defect is impossible. The system must operate under an Unsupervised/Semi-Supervised paradigm.
 
-### Key Features:
+1. We train a **Convolutional Autoencoder (CAE)** strictly on normal images.
+2. The CAE learns to compress and reconstruct the visual traits of a "perfect" bottle.
+3. During inference, when presented with a defective bottle, the CAE struggles to reconstruct the anomaly.
+4. By comparing the input to the reconstruction, we can extract an **Anomaly Heatmap** (based on the Mean Squared Error of the pixels) and classify the image based on a computed threshold.
 
-- **Realistic Scenario:** Trained only on normal images.
-- **Realistic Anomalies:** Detects subtle, localized manufacturing defects.
-- **Hyperparameter Optimization:** Utilizes [Optuna](https://optuna.org/) to find the best configuration (learning rate, network capacity, batch size, weight decay) based on the ROC-AUC score.
-- **Baseline Comparison:** Benchmarks the CAE against scikit-learn models including PCA Reconstruction, Isolation Forest, One-Class SVM, Local Outlier Factor (LOF), and Elliptic Envelope.
+---
 
-## System Architecture
+## 🏗️ System Architecture & Workflow
 
-### 1. Overall Workflow Pipeline
+### 1. Overall Pipeline
+
+The lifecycle of the project revolves around data loading, training a reconstruction model, calculating reconstruction errors, and performing automated hyperparameter tuning.
 
 ```mermaid
 graph TD
-    A[MVTec AD Dataset <br/> 'bottle' category] --> B[Data Preprocessing <br/> Resize to 128x128]
-    B --> C{Training Phase}
-    C -->|Train Dataloader| D[Normal Images Only]
-    D --> E[Convolutional Autoencoder]
+    A[MVTec AD 'bottle' Dataset] --> B[Preprocessing: Resize to 128x128 & Tensor Normalize]
+
+    %% Training Flow
+    B -->|Train Dataloader| C{Training Phase}
+    C --> D[Normal Images Only]
+    D --> E[Convolutional Autoencoder CAE]
     E -->|Reconstruction Loss MSE| E
 
-    C -->|Test Dataloader| F[Test Data <br/> Normal + Anomalies]
-    F --> G[Test Evaluation]
-    E -->|Inference| G
-    G --> H[Reconstruction Error Calculation]
-    H --> I[Threshold Selection <br/> Maximize F1-Score]
-    I --> J[Anomaly Predictions & <br/> Anomaly Map Generation]
+    %% Testing Flow
+    B -->|Test Dataloader| F{Testing Phase}
+    F --> G[Normal & Anomalous Images]
+    G --> H[Model Inference]
+    E --> H
+    H --> I[Pixel-wise Error Calculation]
 
-    K[Optuna] -.->|Hyperparameter Tuning| E
+    %% Evaluation
+    I --> J[Grid Search: Optimal Threshold maximizing F1-Score]
+    J --> K[Final Output: Binary Prediction & Spatial Anomaly Maps]
+
+    %% Tuning
+    L[Optuna Optimizer] -.->|Adjusts learning rate, capacity, batch size| E
 ```
 
 ### 2. Convolutional Autoencoder (CAE) Architecture
 
-The CAE preserves the spatial structure of the images, which is essential for identifying the precise location of anomalies via pixel-wise reconstruction errors.
+To preserve spatial context, our network is fully convolutional, avoiding flattening layers that destroy spatial relationships. The bottleneck forces the model to learn the most essential underlying structural features.
 
 ```mermaid
 graph LR
-    subgraph Encoder
+    subgraph "Encoder (Feature Extraction)"
     In(Input<br/>3x128x128) --> C1(Conv2d + BN + LeakyReLU<br/>stride=2)
     C1 --> C2(Conv2d + BN + LeakyReLU<br/>stride=2)
     C2 --> C3(Conv2d + BN + LeakyReLU<br/>stride=2)
     C3 --> C4(Conv2d + BN + LeakyReLU<br/>stride=2)
     end
 
-    subgraph Bottleneck
-    C4 --> Bot(Latent Space<br/>Channels * 8)
+    subgraph "Latent Bottleneck"
+    C4 --> Bot((Latent Space<br/>Compressed Representation))
     end
 
-    subgraph Decoder
+    subgraph "Decoder (Reconstruction)"
     Bot --> D1(ConvTrans2d + BN + ReLU<br/>stride=2)
     D1 --> D2(ConvTrans2d + BN + ReLU<br/>stride=2)
     D2 --> D3(ConvTrans2d + BN + ReLU<br/>stride=2)
     D3 --> D4(ConvTrans2d + Sigmoid<br/>stride=2)
     D4 --> Out(Reconstructed Image<br/>3x128x128)
     end
+
+    In -.->|Pixel-wise difference highlights anomalies| Out
 ```
 
-## Notebook Structure Summary
+---
 
-1. **Part 1: Anomaly Detection with CAE**
-   - Loads the local MVTec AD (`bottle`) dataset.
-   - Defines the Convolutional Autoencoder architecture using PyTorch.
-   - Trains the model with Early Stopping based on Validation MSE loss.
-   - Evaluates on the test set, computing an optimal threshold that maximizes the F1-Score via grid search over reconstruction errors.
-   - Visualizes evaluation metrics (Loss curves, Error distributions, ROC Curves, Confusion Matrices).
-   - Generates and plots spatial "Anomaly Heatmaps" displaying the absolute pixel differences between the original and reconstructed images.
+## 🔍 Detailed Methodology
 
-2. **Part 2: Hyperparameter Tuning with Optuna**
-   - Automates the optimization of model architecture and training hyperparameters (`learning rate`, `base_channels`, `batch_size`, and `weight_decay`).
-   - Runs shorter trials targeting the maximum ROC-AUC score, which evaluates the model's overall ranking ability irrespective of specific thresholds.
+### Part 1: Convolutional Autoencoder (CAE)
 
-3. **Part 3: Baseline Method Comparisons**
-   - Prepares feature representations by resizing images to 32x32, flattening them, and applying PCA to compress down to 50 principal components.
-   - Evaluates statistical and classical ML approaches on these features:
-     - PCA Reconstruction Error
-     - Isolation Forest
-     - One-Class SVM (RBF kernel)
-     - Elliptic Envelope
-     - Local Outlier Factor (LOF)
-   - Visually benchmarks performance with Bar charts, Precision vs Recall plots, and a final scoring Heatmap to declare the best functioning model.
+- **Data Preparation**: Images are rescaled to 128x128. Training relies strictly on defect-free samples.
+- **Model Training**: Trained using Adam Optimizer and `ReduceLROnPlateau` scheduler. We track Validation MSE Loss and apply _Early Stopping_ to prevent overfitting.
+- **Evaluation & Thresholding**: For every image, we calculate the MSE between the original and reconstructed output. A grid-search computes an optimal decision boundary (threshold) that maximizes the F1-Score.
+- **Explainability (Visualizations)**:
+  - _Placeholder: `![Reconstruction Examples](assets/reconstructions.png)`_
+  - Creates heatmap overlays demonstrating exactly _where_ the model identifies the flaw by mapping pixel-level deviations.
 
-## Results & Conclusions
+### Part 2: Hyperparameter Tuning with Optuna
 
-- The **Convolutional Autoencoder** significantly outperforms traditional ML baselines, providing not just binary classification (Normal vs Anomaly) but also interpretable spatial anomaly maps showing exactly _where_ the defect is located.
-- **Optuna Tuning** efficiently discovers the best combination of network capacity constraints and learning rates.
-- **Baseline Models:** While computationally cheaper, PCA combined with Isolation Forest or One-Class SVM struggle to understand complex spatial patterns and subtler defects compared to the CAE.
+- Instead of relying on manual guessing, we utilize **Optuna** to optimize:
+  - `learning_rate` (1e-4 to 1e-2)
+  - `base_channels` (16, 32, 48 - dictates network width)
+  - `batch_size` (8, 16, 32)
+  - `weight_decay` (regularization penalty)
+- **Objective**: Maximize the ROC-AUC score, which measures the model's ability to rank anomalies higher than normal distributions irrespective of the decision threshold.
+  - _Placeholder: `![Optuna Sweep Graphs](assets/optuna_graphs.png)`_
 
-### Recommendations for Production
+### Part 3: Classical ML Baselines Comparison
 
-- **Use CAE** for robust defect localization and obtaining the highest ROC-AUC/F1 metrics.
-- Consider exploring more advanced state-of-the-art approaches like PatchCore or Variational Autoencoders (VAEs), and integration of Structural Similarity (SSIM) loss for further defect resolution.
+To ensure deep learning is justified, the CAE is rigorously benched against statistical baselines:
+
+1. Feature Extraction: Images are downscaled to 32x32, flattened, and reduced down to 50 dimensions using **PCA**.
+2. Evaluated Models:
+   - **Isolation Forest**: Isolates anomalies through random data partitioning.
+   - **One-Class SVM (OCSVM)**: Learns a decision boundary encapsulating the normal data.
+   - **Elliptic Envelope**: Assumes normal data is Gaussian and detects outliers.
+   - **Local Outlier Factor (LOF)**: Detects local deviations with respect to neighbors.
+   - **PCA Reconstruction Error**.
+
+- _Placeholder: `![Baseline Comparison Bar Chart](assets/baselines.png)`_
+
+---
+
+## 📊 Conclusions & Results
+
+- **CAE Superiority**: The Convolutional Autoencoder significantly outperforms traditional baselines. Classical ML methods (like Isolation Forest and OCSVM on PCA features) struggle to comprehend complex structural patterns, often resulting in lower Precision and Recall.
+- **Interpretability**: The strongest advantage of the CAE is its spatial outputs. While traditional models just output a raw binary score (Anomaly vs. Normal), the CAE outputs accurate heatmaps isolating the physical anomaly location.
+- **Future Improvements**:
+  - Implementation of **SSIM (Structural Similarity Index)** loss instead of pure MSE to better handle natural luminance variations.
+  - Advancing to state-of-the-art representation-based methods like **PatchCore** or generative frameworks like Variational Autoencoders (VAEs).
